@@ -19,7 +19,16 @@ class DatabaseInitializer(private val context: Context) {
             }
             inserirModelosFaltantes(modeloDao)
             sincronizarImagens()
+            TreinoProntosInicializador.popularSeNecessario(db.treinoProntoDao(), modeloDao)
         }
+    }
+
+    /** Garante catálogo + treinos prontos (chamar se o seed inicial ainda não correu). */
+    suspend fun garantirDadosTreino() {
+        val db = AppDatabase.getInstance(context)
+        val modeloDao = db.modeloDao()
+        inserirModelosFaltantes(modeloDao)
+        TreinoProntosInicializador.popularSeNecessario(db.treinoProntoDao(), modeloDao)
     }
 
     suspend fun sincronizarImagens() {

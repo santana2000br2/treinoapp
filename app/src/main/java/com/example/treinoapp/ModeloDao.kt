@@ -8,6 +8,9 @@ interface ModeloDao {
     @Query("SELECT * FROM modelos ORDER BY nome")
     fun getAll(): Flow<List<ModeloEntity>>
 
+    @Query("SELECT * FROM modelos WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): ModeloEntity?
+
     @Query("SELECT COUNT(*) FROM modelos")
     suspend fun getCount(): Int
 

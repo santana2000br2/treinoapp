@@ -1,8 +1,11 @@
 package com.example.treinoapp
 
 import android.graphics.Paint as AndroidPaint
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +19,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,6 +41,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -57,18 +71,21 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
+
+// ==================== LISTA (cards por mês) ====================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,15 +94,7 @@ fun TelaEvolucao(
     viewModel: EvolucaoViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val pontos by viewModel.pesos.collectAsState(initial = emptyList())
-    var mostrarDialogo by remember { mutableStateOf(false) }
-    var mostrarSeletorData by remember { mutableStateOf(false) }
-    var textoPeso by remember { mutableStateOf("") }
-    var dataSelecionadaMillis by remember { mutableStateOf(System.currentTimeMillis()) }
-
-    val fmtDataHora = remember {
-        SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR"))
-    }
+    val medicoes by viewModel.medicoes.collectAsState(initial = emptyList())
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -100,14 +109,8 @@ fun TelaEvolucao(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    textoPeso = ""
-                    dataSelecionadaMillis = System.currentTimeMillis()
-                    mostrarDialogo = true
-                },
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Registar peso")
+            FloatingActionButton(onClick = { navController.navigate("evolucao/cadastro") }) {
+                Icon(Icons.Filled.Add, contentDescription = "Novo registo mensal")
             }
         },
     ) { padding ->
@@ -118,26 +121,17 @@ fun TelaEvolucao(
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                text = "Acompanhamento de peso",
+                text = "Medidas corporais",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 4.dp),
             )
             Text(
-                text = "Cada registo guarda a data em que informaste o peso. O gráfico mostra a tendência ao longo do tempo.",
+                text = "Regista uma vez por mês. Toque numa medida para ver o gráfico de evolução.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 16.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
             )
 
-            PesoLineChart(pontos = pontos)
-
-            Text(
-                text = "Histórico",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
-            )
-
-            if (pontos.isEmpty()) {
+            if (medicoes.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -145,122 +139,345 @@ fun TelaEvolucao(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Sem registos ainda.",
+                        text = "Sem registos ainda.\nUse + para o primeiro registo mensal.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
                     )
                 }
             } else {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 88.dp),
                     modifier = Modifier.weight(1f),
                 ) {
-                    items(pontos.asReversed(), key = { it.id }) { item ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                            ),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = fmtDataHora.format(Date(item.dataMillis)),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Text(
-                                    text = formatarPesoKg(item.pesoKg),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
+                    itemsIndexed(medicoes, key = { _, m -> m.id }) { index, medicao ->
+                        CardMedicaoMensal(
+                            medicao = medicao,
+                            expandidoInicial = index == 0,
+                            onEditar = { navController.navigate("evolucao/editar/${medicao.id}") },
+                            onExcluir = { viewModel.excluirMedicao(medicao.id) {} },
+                            onVerGrafico = { tipo ->
+                                navController.navigate("evolucao/grafico/${tipo.id}")
+                            },
+                        )
                     }
                 }
             }
         }
     }
+}
 
-    if (mostrarDialogo) {
-        val pesoOk = parsePesoKg(textoPeso) != null
-        AlertDialog(
-            onDismissRequest = {
-                mostrarDialogo = false
-                textoPeso = ""
-            },
-            title = { Text("Novo registo de peso") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = textoPeso,
-                        onValueChange = { textoPeso = it },
-                        label = { Text("Peso (kg)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
+@Composable
+private fun CardMedicaoMensal(
+    medicao: MedicaoMensalEntity,
+    expandidoInicial: Boolean,
+    onEditar: () -> Unit,
+    onExcluir: () -> Unit,
+    onVerGrafico: (TipoMedicao) -> Unit,
+) {
+    var confirmarExclusao by remember { mutableStateOf(false) }
+    var expandido by remember { mutableStateOf(expandidoInicial) }
+    val preenchidas = remember(medicao) {
+        MedicaoCatalogo.todos.count { tipo -> tipo.valorDe(medicao) != null }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize()
+                .padding(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { expandido = !expandido },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (expandido) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (expandido) "Retrair" else "Expandir",
+                        tint = MaterialTheme.colorScheme.primary,
                     )
-                    OutlinedButton(
-                        onClick = { mostrarSeletorData = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Filled.CalendarMonth, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
                         Text(
-                            text = "Data: ${fmtDataHora.format(Date(dataSelecionadaMillis))}",
-                            style = MaterialTheme.typography.bodyLarge,
+                            text = MedicaoCatalogo.formatarMesReferencia(medicao.mesReferencia),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Data: ${MedicaoCatalogo.formatarData(medicao.dataMillis)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!expandido) {
+                            Text(
+                                text = if (preenchidas == 0) {
+                                    "Nenhuma medida · toque para expandir"
+                                } else {
+                                    "$preenchidas medida(s) · toque para expandir"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+                IconButton(onClick = onEditar) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Editar")
+                }
+                IconButton(onClick = { confirmarExclusao = true }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Excluir")
+                }
+            }
+
+            if (expandido) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                MedicaoCatalogo.todos.forEach { tipo ->
+                    val valor = tipo.valorDe(medicao)
+                    if (valor != null) {
+                        LinhaMedicaoCard(
+                            tipo = tipo,
+                            valor = valor,
+                            onVerGrafico = { onVerGrafico(tipo) },
                         )
                     }
                 }
-            },
+
+                if (preenchidas == 0) {
+                    Text(
+                        text = "Nenhuma medida preenchida neste registo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (confirmarExclusao) {
+        AlertDialog(
+            onDismissRequest = { confirmarExclusao = false },
+            title = { Text("Excluir registo?") },
+            text = { Text("Este registo mensal será removido permanentemente.") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val p = parsePesoKg(textoPeso) ?: return@TextButton
-                        viewModel.adicionarPeso(p, dataSelecionadaMillis)
-                        textoPeso = ""
-                        mostrarDialogo = false
-                    },
-                    enabled = pesoOk,
-                ) {
-                    Text("Guardar")
+                TextButton(onClick = {
+                    confirmarExclusao = false
+                    onExcluir()
+                }) {
+                    Text("Excluir")
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        mostrarDialogo = false
-                        textoPeso = ""
-                    },
-                ) {
+                TextButton(onClick = { confirmarExclusao = false }) {
                     Text("Cancelar")
                 }
             },
         )
     }
+}
 
-    if (mostrarSeletorData) {
-        key(dataSelecionadaMillis) {
-            val dateState = rememberDatePickerState(initialSelectedDateMillis = dataSelecionadaMillis)
+@Composable
+private fun LinhaMedicaoCard(
+    tipo: TipoMedicao,
+    valor: Double,
+    onVerGrafico: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onVerGrafico)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(
+                Icons.Filled.ShowChart,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(end = 8.dp),
+            )
+            Text(text = tipo.rotulo, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(
+            text = MedicaoCatalogo.formatarValor(tipo, valor),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+// ==================== CADASTRO MENSAL ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TelaMedicaoCadastro(
+    navController: NavController,
+    viewModel: EvolucaoViewModel,
+    medicaoId: Long,
+    modifier: Modifier = Modifier,
+) {
+    val contexto = LocalContext.current
+    val scroll = rememberScrollState()
+
+    var carregado by remember { mutableStateOf(medicaoId == 0L) }
+    var dataMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var campos by remember { mutableStateOf(camposMedicaoVazios()) }
+    var mostrarData by remember { mutableStateOf(false) }
+    var instrucaoTipo by remember { mutableStateOf<TipoMedicao?>(null) }
+
+    LaunchedEffect(medicaoId) {
+        if (medicaoId != 0L) {
+            viewModel.obterPorId(medicaoId)?.let { m ->
+                dataMillis = m.dataMillis
+                campos = camposDeEntidade(m)
+            }
+        }
+        carregado = true
+    }
+
+    if (!carregado) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("A carregar…")
+        }
+        return
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text(if (medicaoId == 0L) "Novo registo mensal" else "Editar registo") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(scroll)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Preencha as medidas do mês. Campos vazios são ignorados. Pelo menos uma medida é obrigatória.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            OutlinedButton(
+                onClick = { mostrarData = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.CalendarMonth, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Referência: ${MedicaoCatalogo.formatarData(dataMillis)}")
+            }
+
+            MedicaoCatalogo.todos.forEach { tipo ->
+                CampoMedicao(
+                    tipo = tipo,
+                    valor = campos[tipo.id].orEmpty(),
+                    onValorChange = { campos = campos + (tipo.id to it) },
+                    onInfo = { instrucaoTipo = tipo },
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    viewModel.salvarMedicao(
+                        id = medicaoId,
+                        dataMillis = dataMillis,
+                        pesoKg = parseDecimal(campos["peso"]),
+                        alturaCm = parseDecimal(campos["altura"]),
+                        cinturaCm = parseDecimal(campos["cintura"]),
+                        abdomenCm = parseDecimal(campos["abdomen"]),
+                        peitoCm = parseDecimal(campos["peito"]),
+                        quadrilCm = parseDecimal(campos["quadril"]),
+                        bracoEsquerdoCm = parseDecimal(campos["braco_esquerdo"]),
+                        bracoDireitoCm = parseDecimal(campos["braco_direito"]),
+                        coxaEsquerdaCm = parseDecimal(campos["coxa_esquerda"]),
+                        coxaDireitaCm = parseDecimal(campos["coxa_direita"]),
+                        panturrilhaEsquerdaCm = parseDecimal(campos["panturrilha_esquerda"]),
+                        panturrilhaDireitaCm = parseDecimal(campos["panturrilha_direita"]),
+                        onSucesso = { navController.popBackStack() },
+                        onMesDuplicado = {
+                            Toast.makeText(
+                                contexto,
+                                "Já existe registo para este mês. Edite o registo existente.",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        },
+                        onSemDados = {
+                            Toast.makeText(
+                                contexto,
+                                "Informe pelo menos uma medida.",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Guardar registo mensal")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+
+    instrucaoTipo?.let { tipo ->
+        AlertDialog(
+            onDismissRequest = { instrucaoTipo = null },
+            title = { Text("Como medir: ${tipo.rotulo}") },
+            text = { Text(tipo.instrucao) },
+            confirmButton = {
+                TextButton(onClick = { instrucaoTipo = null }) {
+                    Text("OK")
+                }
+            },
+        )
+    }
+
+    if (mostrarData) {
+        key(dataMillis) {
+            val dateState = rememberDatePickerState(initialSelectedDateMillis = dataMillis)
             DatePickerDialog(
-                onDismissRequest = { mostrarSeletorData = false },
+                onDismissRequest = { mostrarData = false },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            dateState.selectedDateMillis?.let { dataSelecionadaMillis = it }
-                            mostrarSeletorData = false
+                            dateState.selectedDateMillis?.let { dataMillis = it }
+                            mostrarData = false
                         },
                     ) {
                         Text("OK")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { mostrarSeletorData = false }) {
+                    TextButton(onClick = { mostrarData = false }) {
                         Text("Cancelar")
                     }
                 },
@@ -272,8 +489,112 @@ fun TelaEvolucao(
 }
 
 @Composable
-private fun PesoLineChart(
-    pontos: List<PesoEvolucaoEntity>,
+private fun CampoMedicao(
+    tipo: TipoMedicao,
+    valor: String,
+    onValorChange: (String) -> Unit,
+    onInfo: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = valor,
+            onValueChange = onValorChange,
+            label = { Text("${tipo.rotulo} (${tipo.unidade})") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onInfo) {
+            Icon(Icons.Filled.Info, contentDescription = "Como medir")
+        }
+    }
+}
+
+// ==================== GRÁFICO POR INDICADOR ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TelaMedicaoGrafico(
+    navController: NavController,
+    tipoId: String,
+    medicoes: List<MedicaoMensalEntity>,
+    modifier: Modifier = Modifier,
+) {
+    val tipo = MedicaoCatalogo.tipoPorId(tipoId)
+
+    if (tipo == null) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Medida não encontrada")
+        }
+        return
+    }
+
+    val pontos = medicoes
+        .mapNotNull { m ->
+            val v = tipo.valorDe(m)
+            if (v != null) m to v else null
+        }
+        .sortedBy { it.first.mesReferencia }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Gráfico — ${tipo.rotulo}") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Voltar")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+        ) {
+            Text(
+                text = "Evolução de ${tipo.rotulo} (${tipo.unidade}) ao longo dos meses.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+
+            MedicaoLineChart(
+                pontos = pontos,
+                unidade = tipo.unidade,
+                rotulo = tipo.rotulo,
+            )
+
+            if (pontos.size >= 2) {
+                val primeiro = pontos.first().second
+                val ultimo = pontos.last().second
+                val diff = ultimo - primeiro
+                val sinal = when {
+                    diff > 0.05 -> "+"
+                    diff < -0.05 -> ""
+                    else -> "±"
+                }
+                Text(
+                    text = "Variação total: $sinal${String.format(Locale("pt", "BR"), "%.1f", diff)} ${tipo.unidade}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MedicaoLineChart(
+    pontos: List<Pair<MedicaoMensalEntity, Double>>,
+    unidade: String,
+    rotulo: String,
     modifier: Modifier = Modifier,
 ) {
     val gridLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -292,7 +613,7 @@ private fun PesoLineChart(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "Regista o teu peso com + para veres o gráfico.",
+                text = "Regista $rotulo em pelo menos um mês para ver o gráfico.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = gridLabelColor,
                 textAlign = TextAlign.Center,
@@ -303,21 +624,21 @@ private fun PesoLineChart(
     }
 
     val density = LocalDensity.current
-    val padLeft = 48.dp
+    val padLeft = 52.dp
     val padRight = 12.dp
     val padTop = 10.dp
-    val padBottom = 30.dp
+    val padBottom = 36.dp
 
-    val minP = pontos.minOf { it.pesoKg }
-    val maxP = pontos.maxOf { it.pesoKg }
-    val minT = pontos.minOf { it.dataMillis }
-    var maxT = pontos.maxOf { it.dataMillis }
-    if (maxT <= minT) maxT = minT + 86_400_000L
+    val valores = pontos.map { it.second }
+    val minV = valores.min()
+    val maxV = valores.max()
+    val indices = pontos.indices.toList()
+    val minI = 0
+    var maxI = indices.max()
+    if (maxI <= minI) maxI = minI + 1
 
-    val (yLo, yHi) = niceYRangeKg(minP, maxP)
+    val (yLo, yHi) = niceYRange(minV, maxV)
     val yTicks = buildYTicks(yLo, yHi)
-
-    val fmtCurto = remember { SimpleDateFormat("d MMM", Locale("pt", "BR")) }
 
     Canvas(
         modifier = modifier
@@ -334,11 +655,11 @@ private fun PesoLineChart(
         val chartW = w - pl - pr
         val chartH = h - pt - pb
 
-        fun xForTime(t: Long): Float =
-            pl + (t - minT).toFloat() / (maxT - minT).toFloat() * chartW
+        fun xForIndex(i: Int): Float =
+            pl + (i - minI).toFloat() / (maxI - minI).toFloat() * chartW
 
-        fun yForPeso(kg: Double): Float =
-            pt + ((yHi - kg) / (yHi - yLo)).toFloat() * chartH
+        fun yForValor(v: Double): Float =
+            pt + ((yHi - v) / (yHi - yLo)).toFloat() * chartH
 
         val labelPaint = AndroidPaint().apply {
             isAntiAlias = true
@@ -347,7 +668,7 @@ private fun PesoLineChart(
         }
 
         yTicks.forEach { yk ->
-            val yPx = yForPeso(yk)
+            val yPx = yForValor(yk)
             drawLine(
                 color = gridLabelColor.copy(alpha = 0.22f),
                 start = Offset(pl, yPx),
@@ -355,7 +676,11 @@ private fun PesoLineChart(
                 strokeWidth = 1.dp.toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f),
             )
-            val label = "${yk.toInt()} kg"
+            val label = if (unidade == "kg") {
+                "${yk.toInt()} kg"
+            } else {
+                "${yk.toInt()} $unidade"
+            }
             val tw = labelPaint.measureText(label)
             drawContext.canvas.nativeCanvas.drawText(
                 label,
@@ -367,10 +692,9 @@ private fun PesoLineChart(
 
         if (pontos.size >= 2) {
             val path = Path()
-            val first = pontos.first()
-            path.moveTo(xForTime(first.dataMillis), yForPeso(first.pesoKg))
-            pontos.drop(1).forEach { p ->
-                path.lineTo(xForTime(p.dataMillis), yForPeso(p.pesoKg))
+            path.moveTo(xForIndex(0), yForValor(pontos[0].second))
+            pontos.drop(1).forEachIndexed { idx, p ->
+                path.lineTo(xForIndex(idx + 1), yForValor(p.second))
             }
             drawPath(
                 path = path,
@@ -381,71 +705,93 @@ private fun PesoLineChart(
                     join = StrokeJoin.Round,
                 ),
             )
-        } else {
-            val p = pontos.first()
+        }
+        pontos.forEachIndexed { idx, p ->
             drawCircle(
                 color = lineColor,
                 radius = 6.dp.toPx(),
-                center = Offset(xForTime(p.dataMillis), yForPeso(p.pesoKg)),
+                center = Offset(xForIndex(idx), yForValor(p.second)),
             )
         }
 
-        val xTicks = 6
-        for (i in 0..xTicks) {
-            val t = minT + ((maxT - minT) * i) / xTicks
-            val xPx = xForTime(t)
-            val label = fmtCurto.format(Date(t))
+        pontos.forEachIndexed { idx, p ->
+            val label = rotuloMesCurto(p.first.mesReferencia)
             val tw = labelPaint.measureText(label)
             drawContext.canvas.nativeCanvas.drawText(
                 label,
-                (xPx - tw / 2f).coerceIn(pl, w - pr - tw),
-                h - 6.dp.toPx(),
+                (xForIndex(idx) - tw / 2f).coerceIn(pl, w - pr - tw),
+                h - 8.dp.toPx(),
                 labelPaint,
             )
         }
     }
 }
 
-private fun niceYRangeKg(minKg: Double, maxKg: Double): Pair<Double, Double> {
-    val span = maxKg - minKg
-    val pad = when {
-        span < 1e-6 -> 2.0
-        else -> max(2.0, span * 0.12)
-    }
-    val lo = floor((minKg - pad) / 5.0) * 5.0
-    val hi = ceil((maxKg + pad) / 5.0) * 5.0
-    return if (hi <= lo) Pair(lo, lo + 5.0) else Pair(lo, hi)
+// ==================== Helpers ====================
+
+private fun camposMedicaoVazios(): Map<String, String> =
+    MedicaoCatalogo.todos.associate { it.id to "" }
+
+private fun camposDeEntidade(m: MedicaoMensalEntity): Map<String, String> {
+    fun fmt(v: Double?) = v?.let {
+        if (it == floor(it)) it.toInt().toString()
+        else String.format(Locale("pt", "BR"), "%.1f", it)
+    }.orEmpty()
+
+    return mapOf(
+        "peso" to fmt(m.pesoKg),
+        "altura" to fmt(m.alturaCm),
+        "cintura" to fmt(m.cinturaCm),
+        "abdomen" to fmt(m.abdomenCm),
+        "peito" to fmt(m.peitoCm),
+        "quadril" to fmt(m.quadrilCm),
+        "braco_esquerdo" to fmt(m.bracoEsquerdoCm),
+        "braco_direito" to fmt(m.bracoDireitoCm),
+        "coxa_esquerda" to fmt(m.coxaEsquerdaCm),
+        "coxa_direita" to fmt(m.coxaDireitaCm),
+        "panturrilha_esquerda" to fmt(m.panturrilhaEsquerdaCm),
+        "panturrilha_direita" to fmt(m.panturrilhaDireitaCm),
+    )
 }
 
-private fun buildYTicks(yLo: Double, yHi: Double): List<Double> {
-    var step = 5.0
-    val firstPass = mutableListOf<Double>()
-    var v = yLo
-    while (v <= yHi + 0.001) {
-        firstPass.add(v)
-        v += step
-    }
-    if (firstPass.size > 14) {
-        step = 10.0
-        val out = mutableListOf<Double>()
-        v = floor(yLo / step) * step
-        while (v <= yHi + 0.001) {
-            out.add(v)
-            v += step
-        }
-        return out
-    }
-    return firstPass
-}
-
-private fun parsePesoKg(text: String): Double? {
-    val t = text.trim().replace(',', '.')
-    val v = t.toDoubleOrNull() ?: return null
+private fun parseDecimal(text: String?): Double? {
+    val t = text?.trim().orEmpty()
+    if (t.isEmpty()) return null
+    val v = t.replace(',', '.').toDoubleOrNull() ?: return null
     if (v <= 0.0 || v > 500.0) return null
     return v
 }
 
-private fun formatarPesoKg(kg: Double): String {
-    val v = if (kg == floor(kg)) kg.toInt().toString() else String.format(Locale("pt", "BR"), "%.1f", kg)
-    return "$v kg"
+private fun niceYRange(minV: Double, maxV: Double): Pair<Double, Double> {
+    val span = maxV - minV
+    val pad = when {
+        span < 1e-6 -> if (maxV > 10) 2.0 else 1.0
+        else -> max(if (maxV > 50) 2.0 else 1.0, span * 0.15)
+    }
+    val lo = floor((minV - pad) / 1.0) * 1.0
+    val hi = ceil((maxV + pad) / 1.0) * 1.0
+    return if (hi <= lo) Pair(lo, lo + 1.0) else Pair(lo, hi)
+}
+
+private fun rotuloMesCurto(mesReferencia: String): String {
+    val partes = mesReferencia.split("-")
+    if (partes.size != 2) return mesReferencia
+    return "${partes[1]}/${partes[0].takeLast(2)}"
+}
+
+private fun buildYTicks(yLo: Double, yHi: Double): List<Double> {
+    val span = yHi - yLo
+    val step = when {
+        span <= 5 -> 1.0
+        span <= 20 -> 2.0
+        span <= 50 -> 5.0
+        else -> 10.0
+    }
+    val out = mutableListOf<Double>()
+    var v = floor(yLo / step) * step
+    while (v <= yHi + 0.001) {
+        out.add(v)
+        v += step
+    }
+    return out
 }

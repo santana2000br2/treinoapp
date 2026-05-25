@@ -175,5 +175,17 @@ object CatalogoTreinos {
         TreinoCatalogoSeed("Farmer Walk", desc("Halteres / Kettlebells", "Corpo inteiro", "3", "20 a 40 metros")),
         TreinoCatalogoSeed("Mountain Climber", desc("Peso Corporal", "Corpo inteiro", "3", "30 segundos")),
         TreinoCatalogoSeed("Alongamento de Lombar", desc("Peso Corporal", "Lombar", "2", "30 segundos")),
+        TreinoCatalogoSeed(
+            "Tríceps Corda na Polia",
+            desc("Polia (corda)", "Tríceps", "3", "12 a 15"),
+        ),
+        TreinoCatalogoSeed(
+            "HIIT na Esteira",
+            desc("Esteira", "Cardio", "1", "20 min — 30s forte / 1 min leve"),
+        ),
+        TreinoCatalogoSeed(
+            "Agachamento com Halteres",
+            desc("Halteres", "Pernas", "4", "10 a 12"),
+        ),
     )
 }

@@ -25,12 +25,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CalendarViewMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Settings
@@ -42,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -51,9 +58,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.navigation.NavController
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import coil.compose.rememberAsyncImagePainter
 import com.example.treinoapp.ui.theme.TreinoAppTheme
 import kotlinx.coroutines.delay
@@ -76,12 +88,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Inicializa o banco com dados padrão (apenas na primeira execução)
-        DatabaseInitializer(this).populateIfNeeded()
+        val dbInitializer = DatabaseInitializer(this)
+        dbInitializer.populateIfNeeded()
+        lifecycleScope.launch(Dispatchers.IO) {
+            dbInitializer.garantirDadosTreino()
+        }
         setContent {
             val context = LocalContext.current
             var themeMode by remember {
                 mutableStateOf(ThemePreferences.getMode(context))
+            }
+            var homeVisualStyle by remember {
+                mutableStateOf(ThemePreferences.getHomeVisualStyle(context))
             }
             val systemDark = isSystemInDarkTheme()
             val useDarkTheme = when (themeMode) {
@@ -92,9 +110,14 @@ class MainActivity : ComponentActivity() {
             TreinoAppTheme(darkTheme = useDarkTheme) {
                 AppNavigation(
                     themeMode = themeMode,
+                    homeVisualStyle = homeVisualStyle,
                     onThemeModeChange = { newMode ->
                         ThemePreferences.setMode(context, newMode)
                         themeMode = newMode
+                    },
+                    onHomeVisualStyleChange = { newStyle ->
+                        ThemePreferences.setHomeVisualStyle(context, newStyle)
+                        homeVisualStyle = newStyle
                     },
                 )
             }
@@ -107,7 +130,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    homeVisualStyle: HomeVisualStyle = HomeVisualStyle.SIMPLE,
     onThemeModeChange: (ThemeMode) -> Unit = {},
+    onHomeVisualStyleChange: (HomeVisualStyle) -> Unit = {},
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -130,12 +155,21 @@ fun AppNavigation(
             SplashScreen(navController)
         }
 
-        // MENU INICIAL (Agenda, Dieta, Evolução, Catálogo)
+        // MENU INICIAL (Agenda, Dieta, Evolução; catálogo no ícone superior)
         composable("menu_inicial") {
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
             TelaMenuInicial(
                 navController = navController,
                 themeMode = themeMode,
+                homeVisualStyle = homeVisualStyle,
+                darkTheme = darkTheme,
                 onThemeModeChange = onThemeModeChange,
+                onHomeVisualStyleChange = onHomeVisualStyleChange,
             )
         }
 
@@ -161,18 +195,115 @@ fun AppNavigation(
         }
 
         composable("evolucao") {
-            val evolucaoViewModel: EvolucaoViewModel = viewModel(
-                factory = object : ViewModelProvider.Factory {
-                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                        @Suppress("UNCHECKED_CAST")
-                        return EvolucaoViewModel(context.applicationContext as Application) as T
-                    }
-                },
-            )
+            val evolucaoViewModel = evolucaoViewModelLocal()
             TelaEvolucao(
                 navController = navController,
                 viewModel = evolucaoViewModel,
             )
+        }
+
+        composable("evolucao/cadastro") {
+            val evolucaoViewModel = evolucaoViewModelLocal()
+            TelaMedicaoCadastro(
+                navController = navController,
+                viewModel = evolucaoViewModel,
+                medicaoId = 0L,
+            )
+        }
+
+        composable(
+            route = "evolucao/editar/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getLong("id") ?: 0L
+            val evolucaoViewModel = evolucaoViewModelLocal()
+            TelaMedicaoCadastro(
+                navController = navController,
+                viewModel = evolucaoViewModel,
+                medicaoId = id,
+            )
+        }
+
+        composable(
+            route = "evolucao/grafico/{tipoId}",
+            arguments = listOf(navArgument("tipoId") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val tipoId = backStackEntry.arguments?.getString("tipoId").orEmpty()
+            val evolucaoViewModel = evolucaoViewModelLocal()
+            val medicoes by evolucaoViewModel.medicoes.collectAsState(initial = emptyList())
+            TelaMedicaoGrafico(
+                navController = navController,
+                tipoId = tipoId,
+                medicoes = medicoes,
+            )
+        }
+
+        navigation(
+            startDestination = "lista",
+            route = "fotos_evolucao",
+        ) {
+            composable("lista") {
+                val fotoViewModel = fotoEvolucaoViewModelLocal()
+                TelaFotosEvolucaoLista(
+                    navController = navController,
+                    viewModel = fotoViewModel,
+                )
+            }
+
+            composable("cadastro") {
+                val fotoViewModel = fotoEvolucaoViewModelLocal()
+                TelaFotosEvolucaoCadastro(
+                    navController = navController,
+                    viewModel = fotoViewModel,
+                    sessaoId = 0L,
+                )
+            }
+
+            composable(
+                route = "editar/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getLong("id") ?: 0L
+                val fotoViewModel = fotoEvolucaoViewModelLocal()
+                TelaFotosEvolucaoCadastro(
+                    navController = navController,
+                    viewModel = fotoViewModel,
+                    sessaoId = id,
+                )
+            }
+
+            composable("comparar") {
+                val fotoViewModel = fotoEvolucaoViewModelLocal()
+                TelaFotosEvolucaoComparar(
+                    navController = navController,
+                    viewModel = fotoViewModel,
+                )
+            }
+        }
+
+        navigation(
+            startDestination = "lista",
+            route = "treinos_prontos",
+        ) {
+            composable("lista") {
+                val prontoViewModel = treinoProntoViewModelLocal()
+                TelaTreinosProntosLista(
+                    navController = navController,
+                    viewModel = prontoViewModel,
+                )
+            }
+            composable(
+                route = "detalhe/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getLong("id") ?: 0L
+                val prontoViewModel = treinoProntoViewModelLocal()
+                TelaTreinosProntosDetalhe(
+                    planoId = id,
+                    navController = navController,
+                    viewModel = prontoViewModel,
+                )
+            }
         }
 
         // LISTA DE DIAS
@@ -405,28 +536,93 @@ fun AppNavigation(
     }
 }
 
+@Composable
+private fun evolucaoViewModelLocal(): EvolucaoViewModel {
+    val context = LocalContext.current
+    return viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return EvolucaoViewModel(context.applicationContext as Application) as T
+            }
+        },
+    )
+}
+
+@Composable
+private fun treinoProntoViewModelLocal(): TreinoProntoViewModel {
+    val context = LocalContext.current
+    return viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return TreinoProntoViewModel(context.applicationContext as Application) as T
+            }
+        },
+    )
+}
+
+@Composable
+private fun fotoEvolucaoViewModelLocal(): FotoEvolucaoViewModel {
+    val context = LocalContext.current
+    return viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return FotoEvolucaoViewModel(context.applicationContext as Application) as T
+            }
+        },
+    )
+}
+
 // ==================== MENU INICIAL ====================
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelaMenuInicial(
     navController: NavController,
     themeMode: ThemeMode,
+    homeVisualStyle: HomeVisualStyle,
+    darkTheme: Boolean,
     onThemeModeChange: (ThemeMode) -> Unit,
+    onHomeVisualStyleChange: (HomeVisualStyle) -> Unit,
 ) {
+    val estiloIlustrado = homeVisualStyle == HomeVisualStyle.ILLUSTRATED
+    val fundoHomeIlustradoClaro = estiloIlustrado && !darkTheme
+    val fundoHomeIlustradoEscuro = estiloIlustrado && darkTheme
     var menuAparenciaExpandido by remember { mutableStateOf(false) }
     val hojeYmd = DiaCalendarioUtil.hojeYmd()
     val fraseMotivacional = remember(hojeYmd) { FrasesMotivacionais.fraseDoDia() }
+    val corBarra = when {
+        fundoHomeIlustradoClaro -> HomeIlustradoFundoClaro
+        fundoHomeIlustradoEscuro -> HomeIlustradoFundoEscuro
+        else -> MaterialTheme.colorScheme.surface
+    }
 
     Scaffold(
+        containerColor = when {
+            fundoHomeIlustradoClaro -> HomeIlustradoFundoClaro
+            fundoHomeIlustradoEscuro -> HomeIlustradoFundoEscuro
+            else -> Color.Transparent
+        },
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("TreinoApp") },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = corBarra,
+                ),
+                title = { TituloTreinoApp(estiloIlustrado = estiloIlustrado) },
                 actions = {
+                    IconButton(onClick = { navController.navigate("lista_modelos") }) {
+                        Icon(
+                            imageVector = Icons.Filled.MenuBook,
+                            contentDescription = "Catálogo de treinos",
+                        )
+                    }
                     Box {
                         IconButton(onClick = { menuAparenciaExpandido = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Settings,
-                                contentDescription = "Aparência e definições"
+                                contentDescription = "Aparência",
                             )
                         }
                         DropdownMenu(
@@ -497,158 +693,64 @@ fun TelaMenuInicial(
                                     }
                                 }
                             )
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Text(
+                                text = "Estilo do menu",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Simples (sem imagens)") },
+                                onClick = {
+                                    onHomeVisualStyleChange(HomeVisualStyle.SIMPLE)
+                                    menuAparenciaExpandido = false
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.ViewAgenda, contentDescription = null)
+                                },
+                                trailingIcon = {
+                                    if (homeVisualStyle == HomeVisualStyle.SIMPLE) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selecionado",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Com ilustrações") },
+                                onClick = {
+                                    onHomeVisualStyleChange(HomeVisualStyle.ILLUSTRATED)
+                                    menuAparenciaExpandido = false
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Image, contentDescription = null)
+                                },
+                                trailingIcon = {
+                                    if (homeVisualStyle == HomeVisualStyle.ILLUSTRATED) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selecionado",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
                 }
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "Escolha uma opção",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { navController.navigate("lista_dias") }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.CalendarMonth,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Column {
-                        Text(
-                            text = "Agenda de treino",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Organize os treinos por dia da semana",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { navController.navigate("dieta") }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Restaurant,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Column {
-                        Text(
-                            text = "Dieta",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Alimentação e planos nutricionais",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { navController.navigate("evolucao") }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.ShowChart,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Column {
-                        Text(
-                            text = "Evolução",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Acompanha o teu progresso ao longo do tempo",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { navController.navigate("lista_modelos") }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.MenuBook,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Column {
-                        Text(
-                            text = "Catálogo de treino",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Modelos para copiar na agenda",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-            Text(
-                text = fraseMotivacional,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, start = 4.dp, end = 4.dp),
-            )
-        }
+        ConteudoMenuInicial(
+            navController = navController,
+            darkTheme = darkTheme,
+            homeVisualStyle = homeVisualStyle,
+            fraseMotivacional = fraseMotivacional,
+            modifier = Modifier.padding(paddingValues),
+        )
     }
 }
 
